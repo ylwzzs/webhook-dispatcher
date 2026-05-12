@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Webhook 调度中心</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
+.header{background:#1e293b;border-bottom:1px solid #334155;padding:16px 24px;display:flex;align-items:center;justify-content:space-between}
+.header h1{font-size:18px;font-weight:600;color:#f8fafc}
+.header .stats{display:flex;gap:16px;font-size:13px;color:#94a3b8}
+.header .stats span{color:#38bdf8}
+.container{max-width:1200px;margin:0 auto;padding:20px 24px}
+.tabs{display:flex;gap:4px;margin-bottom:20px;background:#1e293b;border-radius:8px;padding:4px}
+.tab{padding:8px 20px;border-radius:6px;cursor:pointer;font-size:14px;color:#94a3b8;transition:all .2s;border:none;background:none}
+.tab:hover{color:#e2e8f0}
+.tab.active{background:#334155;color:#f8fafc;font-weight:500}
+.card{background:#1e293b;border:1px solid #334155;border-radius:10px;margin-bottom:16px;overflow:hidden}
+.card-header{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #334155}
+.card-header h3{font-size:14px;font-weight:600;color:#f1f5f9}
+.card-body{padding:16px 18px}
+.btn{padding:6px 14px;border-radius:6px;font-size:13px;cursor:pointer;border:none;transition:all .15s}
+.btn-primary{background:#3b82f6;color:#fff}.btn-primary:hover{background:#2563eb}
+.btn-danger{background:#ef4444;color:#fff}.btn-danger:hover{background:#dc2626}
+.btn-sm{padding:4px 10px;font-size:12px}
+.btn-ghost{background:transparent;color:#94a3b8;border:1px solid #475569}.btn-ghost:hover{color:#e2e8f0;border-color:#94a3b8}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px 14px;color:#94a3b8;font-weight:500;border-bottom:1px solid #334155;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+td{padding:10px 14px;border-bottom:1px solid #1e293b}
+tr:hover td{background:#1e293b80}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500}
+.badge-blue{background:#1e3a5f;color:#60a5fa}
+.badge-green{background:#14532d;color:#4ade80}
+.badge-red{background:#450a0a;color:#f87171}
+.badge-yellow{background:#422006;color:#fbbf24}
+.badge-gray{background:#1e293b;color:#94a3b8}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;font-weight:500}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:8px 12px;border-radius:6px;border:1px solid #475569;background:#0f172a;color:#e2e8f0;font-size:13px;font-family:inherit}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:#3b82f6}
+.form-row{display:flex;gap:12px}
+.form-row .form-group{flex:1}
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:100}
+.modal-overlay.show{display:flex}
+.modal{background:#1e293b;border:1px solid #334155;border-radius:12px;width:560px;max-height:80vh;overflow-y:auto;padding:24px}
+.modal h2{font-size:16px;margin-bottom:18px;color:#f1f5f9}
+.modal .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;padding-top:16px;border-top:1px solid #334155}
+.conflict-box{background:#422006;border:1px solid #92400e;border-radius:8px;padding:12px;margin:12px 0;font-size:13px;color:#fbbf24}
+.conflict-box .title{font-weight:600;margin-bottom:6px}
+.conflict-box li{margin:4px 0 4px 16px;color:#fcd34d}
+.empty{color:#64748b;text-align:center;padding:40px;font-size:14px}
+.rule-drag{cursor:grab;padding:2px 6px;color:#475569;user-select:none}
+.rule-drag:active{cursor:grabbing}
+.actions-cell{display:flex;gap:6px}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Webhook 调度中心</h1>
+  <div class="stats" id="header-stats"></div>
+</div>
+<div class="container">
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('routes')">路由</button>
+    <button class="tab" onclick="switchTab('credentials')">凭据</button>
+    <button class="tab" onclick="switchTab('events')">事件日志</button>
+  </div>
+  <div id="tab-routes"></div>
+  <div id="tab-credentials" style="display:none"></div>
+  <div id="tab-events" style="display:none"></div>
+</div>
+
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal-content"></div>
+</div>
+
+<script>
+const API = '/api';
+let currentTab = 'routes';
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {headers: {'Content-Type': 'application/json'}, ...opts});
+  if (!res.ok && res.status !== 200) {
+    const text = await res.text();
+    throw new Error(text);
+  }
+  return res.json();
+}
+
+async function loadStats() {
+  try {
+    const s = await api('/stats');
+    document.getElementById('header-stats').innerHTML =
+      `<span>${s.routes}</span> 路由 &nbsp; <span>${s.credentials}</span> 凭据 &nbsp; <span>${s.rules}</span> 规则 &nbsp; <span>${s.events.forward_ok}</span>/<span>${s.events.forward_fail}</span> 成功/失败`;
+  } catch(e) {}
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => { if (t.textContent.includes(tab === 'routes' ? '路由' : tab === 'credentials' ? '凭据' : '事件')) t.classList.add('active'); });
+  document.getElementById('tab-routes').style.display = tab === 'routes' ? '' : 'none';
+  document.getElementById('tab-credentials').style.display = tab === 'credentials' ? '' : 'none';
+  document.getElementById('tab-events').style.display = tab === 'events' ? '' : 'none';
+  if (tab === 'routes') loadRoutes();
+  else if (tab === 'credentials') loadCredentials();
+  else if (tab === 'events') loadEvents();
+}
+
+function badge(text, cls) { return `<span class="badge ${cls}">${text}</span>`; }
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ---- ROUTES ----
+async function loadRoutes() {
+  const routes = await api('/routes');
+  const el = document.getElementById('tab-routes');
+  if (!routes.length) { el.innerHTML = '<div class="card"><div class="card-body"><div class="empty">暂无路由</div></div></div>'; return; }
+  let html = '';
+  for (const r of routes) {
+    const decBadge = r.decryptor ? badge(r.decryptor, 'badge-blue') : badge('无解密器', 'badge-gray');
+    const credBadge = r.credentials ? badge(r.credentials, 'badge-green') : '';
+    html += `<div class="card">
+      <div class="card-header">
+        <h3>${esc(r.name)} ${decBadge} ${credBadge}</h3>
+        <div><button class="btn btn-primary btn-sm" onclick="showAddRule('${esc(r.name)}')">+ 规则</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteRoute('${esc(r.name)}')">删除路由</button></div>
+      </div>
+      <div class="card-body"><table><thead><tr><th></th><th>名称</th><th>条件</th><th>动作</th><th>上下文</th><th>状态</th><th>操作</th></tr></thead><tbody>`;
+    const rules = r.rules || [];
+    for (let i = 0; i < rules.length; i++) {
+      const rule = rules[i];
+      const actionType = (rule.action || {}).type || '-';
+      const actionBadge = actionType === 'ignore' ? badge('ignore', 'badge-red') :
+                          actionType === 'forward' ? badge('forward', 'badge-green') :
+                          actionType === 'ai_process' ? badge('ai_process', 'badge-blue') : badge(actionType, 'badge-gray');
+      const enabledBadge = rule.enabled !== false ? badge('启用', 'badge-green') : badge('禁用', 'badge-gray');
+      const conds = Object.entries(rule.conditions || {}).map(([k,v]) => `${k}=${v}`).join(', ') || '(全部)';
+      html += `<tr>
+        <td class="rule-drag" draggable="true" data-route="${esc(r.name)}" data-idx="${i}">⠿</td>
+        <td>${esc(rule.name)}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(conds)}</td>
+        <td>${actionBadge}</td>
+        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#94a3b8;font-size:12px">${esc(rule.context || '')}</td>
+        <td>${enabledBadge}</td>
+        <td class="actions-cell">
+          <button class="btn btn-ghost btn-sm" onclick="showEditRule('${esc(r.name)}','${esc(rule.name)}')">编辑</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteRule('${esc(r.name)}','${esc(rule.name)}')">删除</button>
+        </td></tr>`;
+    }
+    html += `</tbody></table></div></div>`;
+  }
+  el.innerHTML = html + `<button class="btn btn-primary" style="margin-top:8px" onclick="showAddRoute()">+ 新增路由</button>`;
+  setupDragSort();
+}
+
+function setupDragSort() {
+  let dragRoute, dragIdx;
+  document.querySelectorAll('.rule-drag').forEach(el => {
+    el.addEventListener('dragstart', e => { dragRoute = el.dataset.route; dragIdx = parseInt(el.dataset.idx); e.dataTransfer.effectAllowed = 'move'; });
+    el.addEventListener('dragover', e => e.preventDefault());
+    el.addEventListener('drop', async e => {
+      e.preventDefault();
+      const targetRoute = el.dataset.route;
+      const targetIdx = parseInt(el.dataset.idx);
+      if (dragRoute !== targetRoute) return;
+      // Reorder
+      const rules = await api(`/routes/${targetRoute}/rules`);
+      const order = rules.map(r => r.name);
+      const [moved] = order.splice(dragIdx, 1);
+      order.splice(targetIdx, 0, moved);
+      await api(`/routes/${targetRoute}/rules/reorder`, {method: 'PUT', body: JSON.stringify(order)});
+      loadRoutes();
+    });
+  });
+}
+
+async function deleteRoute(name) {
+  if (!confirm(`确定删除路由 "${name}"？`)) return;
+  await api(`/routes/${name}`, {method: 'DELETE'});
+  loadRoutes(); loadStats();
+}
+
+async function deleteRule(routeName, ruleName) {
+  if (!confirm(`确定删除规则 "${ruleName}"？`)) return;
+  await api(`/routes/${routeName}/rules/${ruleName}`, {method: 'DELETE'});
+  loadRoutes(); loadStats();
+}
+
+function showAddRoute() {
+  showModal('新增路由', `
+    <div class="form-group"><label>路由名称</label><input id="f-route-name" placeholder="如 wecom-hr"></div>
+    <div class="form-group"><label>描述</label><input id="f-route-desc" placeholder="企微HR应用回调"></div>
+    <div class="form-row">
+      <div class="form-group"><label>凭据</label><select id="f-route-cred"><option value="">无</option></select></div>
+      <div class="form-group"><label>转发目标</label><input id="f-route-fwd" placeholder="wecom"></div>
+    </div>
+    <div class="form-group"><label>密钥 (可选)</label><input id="f-route-secret"></div>
+  `, async () => {
+    const name = document.getElementById('f-route-name').value.trim();
+    if (!name) return alert('请输入路由名称');
+    await api('/routes', {method: 'POST', body: JSON.stringify({
+      name, description: document.getElementById('f-route-desc').value,
+      credentials: document.getElementById('f-route-cred').value || null,
+      forward_to: document.getElementById('f-route-fwd').value,
+      secret: document.getElementById('f-route-secret').value,
+    })});
+    closeModal(); loadRoutes(); loadStats();
+  });
+  // Populate credential options
+  api('/credentials').then(creds => {
+    const sel = document.getElementById('f-route-cred');
+    creds.forEach(c => { const o = document.createElement('option'); o.value = c.name; o.textContent = `${c.name} (${c.type})`; sel.appendChild(o); });
+  });
+}
+
+function ruleFormFields(rule = {}) {
+  const conds = rule.conditions || {};
+  const action = rule.action || {};
+  let condRows = Object.entries(conds).map(([k,v]) => `<div class="form-row"><div class="form-group"><input value="${esc(k)}" placeholder="Key" class="cond-key"></div><div class="form-group"><input value="${esc(v)}" placeholder="Value" class="cond-val"></div></div>`).join('');
+  return `
+    <div class="form-group"><label>规则名称</label><input id="f-rule-name" value="${esc(rule.name || '')}"></div>
+    <div class="form-row">
+      <div class="form-group"><label>动作类型</label><select id="f-rule-action"><option value="forward" ${action.type==='forward'?'selected':''}>forward</option><option value="ignore" ${action.type==='ignore'?'selected':''}>ignore</option><option value="ai_process" ${action.type==='ai_process'?'selected':''}>ai_process</option></select></div>
+      <div class="form-group"><label>启用</label><select id="f-rule-enabled"><option value="true" ${rule.enabled!==false?'selected':''}>启用</option><option value="false" ${rule.enabled===false?'selected':''}>禁用</option></select></div>
+    </div>
+    <div class="form-group"><label>匹配条件 <button class="btn btn-ghost btn-sm" onclick="addCondRow()">+</button></label><div id="cond-rows">${condRows || '<div class="form-row"><div class="form-group"><input placeholder="Key" class="cond-key"></div><div class="form-group"><input placeholder="Value" class="cond-val"></div></div>'}</div></div>
+    <div class="form-group"><label>上下文约定</label><textarea id="f-rule-context" rows="2" placeholder="AI 处理时的上下文提示">${esc(rule.context || '')}</textarea></div>
+    <div class="form-group"><label>Prompt</label><textarea id="f-rule-prompt" rows="2" placeholder="AI 处理提示">${esc(rule.prompt || '')}</textarea></div>`;
+}
+
+function addCondRow() {
+  const el = document.getElementById('cond-rows');
+  el.insertAdjacentHTML('beforeend', '<div class="form-row"><div class="form-group"><input placeholder="Key" class="cond-key"></div><div class="form-group"><input placeholder="Value" class="cond-val"></div></div>');
+}
+
+function getRuleFromForm() {
+  const keys = document.querySelectorAll('.cond-key');
+  const vals = document.querySelectorAll('.cond-val');
+  const conditions = {};
+  keys.forEach((k, i) => { const key = k.value.trim(); const val = vals[i]?.value.trim(); if (key) conditions[key] = val || ''; });
+  return {
+    name: document.getElementById('f-rule-name').value.trim(),
+    enabled: document.getElementById('f-rule-enabled').value === 'true',
+    conditions,
+    action: {type: document.getElementById('f-rule-action').value},
+    context: document.getElementById('f-rule-context').value,
+    prompt: document.getElementById('f-rule-prompt').value,
+  };
+}
+
+function showAddRule(routeName) {
+  showModal(`新增规则 — ${routeName}`, ruleFormFields(), async () => {
+    const rule = getRuleFromForm();
+    if (!rule.name) return alert('请输入规则名称');
+    const res = await api(`/routes/${routeName}/rules`, {method: 'POST', body: JSON.stringify(rule)});
+    if (res.conflicts) {
+      showConflicts(res.conflicts, rule, async () => {
+        // Force add despite conflicts
+        await api(`/routes/${routeName}/rules`, {method: 'POST', body: JSON.stringify({...rule, _force: true})});
+        closeModal(); loadRoutes(); loadStats();
+      });
+      return;
+    }
+    closeModal(); loadRoutes(); loadStats();
+  });
+}
+
+function showEditRule(routeName, ruleName) {
+  api(`/routes/${routeName}/rules`).then(rules => {
+    const rule = rules.find(r => r.name === ruleName);
+    if (!rule) return;
+    showModal(`编辑规则 — ${ruleName}`, ruleFormFields(rule), async () => {
+      const updated = getRuleFromForm();
+      if (!updated.name) return alert('请输入规则名称');
+      const res = await api(`/routes/${routeName}/rules/${ruleName}`, {method: 'PUT', body: JSON.stringify(updated)});
+      if (res.conflicts) {
+        showConflicts(res.conflicts, updated, async () => {
+          await api(`/routes/${routeName}/rules/${ruleName}`, {method: 'PUT', body: JSON.stringify({...updated, _force: true})});
+          closeModal(); loadRoutes(); loadStats();
+        });
+        return;
+      }
+      closeModal(); loadRoutes(); loadStats();
+    });
+  });
+}
+
+function showConflicts(conflicts, rule, onForce) {
+  const el = document.getElementById('modal-content');
+  let html = `<h2>检测到规则冲突</h2><div class="conflict-box"><div class="title">新规则: ${esc(rule.name)}</div><ul>`;
+  conflicts.forEach(c => { html += `<li><strong>${c.type}</strong> — 与 "${esc(c.rule)}": ${esc(c.detail)}</li>`; });
+  html += `</ul></div>`;
+  html += `<div class="actions"><button class="btn btn-ghost" onclick="closeModal()">取消</button><button class="btn btn-primary" id="force-add-btn">强制添加</button></div>`;
+  el.innerHTML = html;
+  document.getElementById('force-add-btn').onclick = onForce;
+}
+
+// ---- CREDENTIALS ----
+async function loadCredentials() {
+  const creds = await api('/credentials');
+  const el = document.getElementById('tab-credentials');
+  if (!creds.length) { el.innerHTML = '<div class="card"><div class="card-body"><div class="empty">暂无凭据</div></div></div><button class="btn btn-primary" onclick="showAddCred()">+ 新增凭据</button>'; return; }
+  let html = '<div class="card"><table><thead><tr><th>名称</th><th>类型</th><th>配置</th><th>操作</th></tr></thead><tbody>';
+  for (const c of creds) {
+    const cfgHtml = Object.entries(c.config).filter(([k]) => k !== 'type').map(([k,v]) => {
+      const masked = (k.includes('key') || k.includes('secret') || k.includes('token')) && v.length > 8 ? v.slice(0,4) + '****' + v.slice(-4) : v;
+      return `<span style="color:#94a3b8">${esc(k)}:</span> ${esc(masked)}`;
+    }).join(' &nbsp; ');
+    html += `<tr><td style="font-weight:500">${esc(c.name)}</td><td>${badge(c.type, 'badge-blue')}</td><td style="font-size:12px">${cfgHtml}</td>
+    <td class="actions-cell"><button class="btn btn-ghost btn-sm" onclick="showEditCred('${esc(c.name)}')">编辑</button><button class="btn btn-danger btn-sm" onclick="deleteCred('${esc(c.name)}')">删除</button></td></tr>`;
+  }
+  html += '</tbody></table></div><button class="btn btn-primary" style="margin-top:8px" onclick="showAddCred()">+ 新增凭据</button>';
+  el.innerHTML = html;
+}
+
+function credFormFields(item = {}) {
+  const cfg = item.config || {};
+  let fields = '';
+  const typeFields = {
+    wecom_aes: [['token','Token'],['encoding_aes_key','EncodingAESKey (43位)'],['receive_id','ReceiveID (CorpID)']],
+    alipay_rsa: [['alipay_public_key','支付宝公钥'],['charset','字符集','UTF-8'],['sign_type','签名类型','RSA2']],
+  };
+  const currentType = item.type || 'wecom_aes';
+  fields += `<div class="form-group"><label>名称</label><input id="f-cred-name" value="${esc(item.name || '')}"></div>
+    <div class="form-group"><label>类型</label><select id="f-cred-type" onchange="updateCredFields()">
+      <option value="wecom_aes" ${currentType==='wecom_aes'?'selected':''}>企微 AES (wecom_aes)</option>
+      <option value="alipay_rsa" ${currentType==='alipay_rsa'?'selected':''}>支付宝 RSA2 (alipay_rsa)</option>
+    </select></div><div id="cred-dynamic-fields">`;
+  const fList = typeFields[currentType] || [];
+  fList.forEach(([key, label, def]) => {
+    fields += `<div class="form-group"><label>${label}</label><input id="f-cred-${key}" value="${esc(cfg[key] || def || '')}"></div>`;
+  });
+  fields += '</div>';
+  return fields;
+}
+
+function updateCredFields() {
+  const type = document.getElementById('f-cred-type').value;
+  const name = document.getElementById('f-cred-name').value;
+  showModal(null, credFormFields({name, type}), null, true);
+}
+
+function getCredFromForm() {
+  const type = document.getElementById('f-cred-type').value;
+  const name = document.getElementById('f-cred-name').value.trim();
+  const config = {type};
+  document.querySelectorAll('#cred-dynamic-fields input').forEach(inp => {
+    const key = inp.id.replace('f-cred-', '');
+    if (inp.value) config[key] = inp.value;
+  });
+  return {name, type, config};
+}
+
+function showAddCred() {
+  showModal('新增凭据', credFormFields(), async () => {
+    const item = getCredFromForm();
+    if (!item.name) return alert('请输入名称');
+    await api('/credentials', {method: 'POST', body: JSON.stringify(item)});
+    closeModal(); loadCredentials(); loadStats();
+  });
+}
+
+function showEditCred(name) {
+  api('/credentials').then(creds => {
+    const c = creds.find(x => x.name === name);
+    if (!c) return;
+    showModal('编辑凭据', credFormFields(c), async () => {
+      const item = getCredFromForm();
+      await api(`/credentials/${name}`, {method: 'PUT', body: JSON.stringify(item)});
+      closeModal(); loadCredentials();
+    });
+  });
+}
+
+async function deleteCred(name) {
+  if (!confirm(`确定删除凭据 "${name}"？`)) return;
+  try {
+    await api(`/credentials/${name}`, {method: 'DELETE'});
+    loadCredentials(); loadStats();
+  } catch(e) { alert(e.message); }
+}
+
+// ---- EVENTS ----
+async function loadEvents() {
+  const events = await api('/events?limit=100');
+  const el = document.getElementById('tab-events');
+  if (!events.length) { el.innerHTML = '<div class="card"><div class="card-body"><div class="empty">暂无事件记录</div></div></div>'; return; }
+  let html = '<div class="card"><table><thead><tr><th>时间</th><th>路由</th><th>事件</th><th>规则</th><th>动作</th><th>结果</th><th>耗时</th></tr></thead><tbody>';
+  for (const e of events.reverse()) {
+    const okBadge = e.ok ? badge('成功', 'badge-green') : badge('失败', 'badge-red');
+    html += `<tr><td style="font-size:12px;color:#94a3b8">${esc(e.ts || '')}</td><td>${esc(e.route)}</td><td>${esc(e.event)}</td><td>${esc(e.rule)}</td><td>${badge(e.action, e.action==='ignore'?'badge-yellow':'badge-blue')}</td><td>${okBadge}</td><td>${e.ms}ms</td></tr>`;
+  }
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
+}
+
+// ---- MODAL ----
+function showModal(title, bodyHtml, onConfirm, skipInit) {
+  const overlay = document.getElementById('modal-overlay');
+  const content = document.getElementById('modal-content');
+  content.innerHTML = (title ? `<h2>${title}</h2>` : '') + bodyHtml +
+    (onConfirm ? `<div class="actions"><button class="btn btn-ghost" onclick="closeModal()">取消</button><button class="btn btn-primary" id="modal-confirm">确认</button></div>` : '');
+  overlay.classList.add('show');
+  if (onConfirm) document.getElementById('modal-confirm').onclick = onConfirm;
+}
+
+function closeModal() { document.getElementById('modal-overlay').classList.remove('show'); }
+document.getElementById('modal-overlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+
+// ---- INIT ----
+loadRoutes();
+loadStats();
+</script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+# Webhook 调度中心配置模板
+# 复制为 config.yaml 并填入真实密钥
+
+server:
+  host: 0.0.0.0
+  port: 8646
+  auth:
+    mode: shared_secret            # shared_secret | ip_whitelist | none
+    shared_secret: "YOUR_SECRET"   # 修改为你的密钥
+
+hermes:
+  webhook_url: http://127.0.0.1:8644/webhooks/{route}
+  default_secret: "YOUR_HERMES_SECRET"   # 修改为 Hermes webhook secret
+
+forward:
+  max_retries: 2
+  retry_delay: 1
+
+credentials:
+  wecom-default:
+    type: wecom_aes
+    token: "YOUR_WECOM_TOKEN"                  # 企微应用 Token
+    encoding_aes_key: "YOUR_WECOM_AES_KEY"     # 43位 EncodingAESKey
+    receive_id: "YOUR_CORP_ID"                  # CorpID
+  # alipay-default:
+  #   type: alipay_rsa
+  #   alipay_public_key: "YOUR_ALIPAY_PUBLIC_KEY"
+  #   charset: UTF-8
+  #   sign_type: RSA2
+
+routes:
+  wecom:
+    description: 企微应用回调
+    credentials: wecom-default
+    secret: "YOUR_ROUTE_SECRET"         # 修改为路由 HMAC 密钥
+    decrypt_optional: true
+    forward_to: wecom
+    rules:
+      - name: ignore-subscribe
+        enabled: true
+        conditions:
+          Event: subscribe
+        action:
+          type: ignore
+      - name: ignore-enter-agent
+        enabled: true
+        conditions:
+          Event: enter_agent
+        action:
+          type: ignore
+      - name: default-forward
+        enabled: true
+        conditions: {}
+        action:
+          type: forward
+        context: 你是企微应用助手，收到回调事件时简要描述事件内容
+  # alipay:
+  #   description: 支付宝回调通知
+  #   credentials: alipay-default
+  #   forward_to: alipay
+  #   rules:
+  #     - name: trade-success
+  #       enabled: true
+  #       conditions:
+  #         trade_status: TRADE_SUCCESS
+  #       action:
+  #         type: forward
+  #     - name: default-forward
+  #       enabled: true
+  #       conditions: {}
+  #       action:
+  #         type: forward

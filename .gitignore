@@ -1,0 +1,14 @@
+# Webhook Dispatcher
+
+.env
+config.yaml
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.patched_hash
+logs/
+*.jsonl

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "webhook-dispatcher"
+version = "2.0.0"
+description = "Webhook dispatcher: decrypt, match rules, forward callbacks to Hermes AI"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [{name = "Duo"}]
+keywords = ["webhook", "hermes", "wecom", "alipay", "dispatcher"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+    "fastapi>=0.100",
+    "uvicorn>=0.23",
+    "httpx>=0.24",
+    "cryptography>=41",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "httpx>=0.24",
+]
+
+[tool.setuptools.packages.find]
+include = ["webhook_dispatcher*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
