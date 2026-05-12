@@ -16,7 +16,11 @@ class RuleEngine:
     def match(self, payload: dict) -> Optional[dict]:
         for rule in self._rules:
             conditions = rule.get("conditions", {})
+            match_not = rule.get("match_not", {})
             if self._match_conditions(conditions, payload):
+                if match_not and self._match_conditions(match_not, payload):
+                    # match_not 条件满足，跳过此规则
+                    continue
                 return rule
         return None
 
@@ -27,6 +31,10 @@ class RuleEngine:
             actual = self._get_nested_value(payload, key)
             if expected == "exists":
                 if actual is None:
+                    return False
+            elif isinstance(expected, list):
+                # match_any: 值在列表中
+                if actual is None or str(actual) not in [str(e) for e in expected]:
                     return False
             elif actual is None or str(actual) != str(expected):
                 return False

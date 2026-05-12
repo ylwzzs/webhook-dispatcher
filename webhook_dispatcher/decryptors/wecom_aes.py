@@ -77,6 +77,18 @@ def _xml_to_dict(xml_text: str) -> dict:
     root = ET.fromstring(xml_text)
     result = {}
     for child in root:
+        # Case 1: child has direct sub-elements (like <ApprovalInfo><SpNo>...</SpNo></ApprovalInfo>)
+        if len(child) > 0:
+            nested = {}
+            for sc in child:
+                # Recursively handle nested elements
+                if len(sc) > 0:
+                    nested[sc.tag] = _element_to_dict(sc)
+                else:
+                    nested[sc.tag] = sc.text or ""
+            result[child.tag] = nested
+            continue
+        # Case 2: child.text contains embedded XML string
         text = child.text or ""
         if "<" in text:
             try:
@@ -88,7 +100,19 @@ def _xml_to_dict(xml_text: str) -> dict:
                 continue
             except ET.ParseError:
                 pass
+        # Case 3: simple text element
         result[child.tag] = text
+    return result
+
+
+def _element_to_dict(elem) -> dict:
+    """Convert an XML element with children to a dict."""
+    result = {}
+    for child in elem:
+        if len(child) > 0:
+            result[child.tag] = _element_to_dict(child)
+        else:
+            result[child.tag] = child.text or ""
     return result
 
 

@@ -12,3 +12,5 @@ venv/
 .patched_hash
 logs/
 *.jsonl
+._*
+.DS_Store
