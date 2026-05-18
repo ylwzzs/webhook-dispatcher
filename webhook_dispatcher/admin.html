@@ -23,6 +23,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .btn{padding:6px 14px;border-radius:6px;font-size:13px;cursor:pointer;border:none;transition:all .15s}
 .btn-primary{background:#3b82f6;color:#fff}.btn-primary:hover{background:#2563eb}
 .btn-danger{background:#ef4444;color:#fff}.btn-danger:hover{background:#dc2626}
+.btn-success{background:#22c55e;color:#fff}.btn-success:hover{background:#16a34a}
 .btn-sm{padding:4px 10px;font-size:12px}
 .btn-ghost{background:transparent;color:#94a3b8;border:1px solid #475569}.btn-ghost:hover{color:#e2e8f0;border-color:#94a3b8}
 table{width:100%;border-collapse:collapse;font-size:13px}
@@ -35,6 +36,7 @@ tr:hover td{background:#1e293b80}
 .badge-red{background:#450a0a;color:#f87171}
 .badge-yellow{background:#422006;color:#fbbf24}
 .badge-gray{background:#1e293b;color:#94a3b8}
+.badge-purple{background:#3b0764;color:#c084fc}
 .form-group{margin-bottom:14px}
 .form-group label{display:block;font-size:12px;color:#94a3b8;margin-bottom:4px;font-weight:500}
 .form-group input,.form-group select,.form-group textarea{width:100%;padding:8px 12px;border-radius:6px;border:1px solid #475569;background:#0f172a;color:#e2e8f0;font-size:13px;font-family:inherit}
@@ -53,6 +55,19 @@ tr:hover td{background:#1e293b80}
 .rule-drag{cursor:grab;padding:2px 6px;color:#475569;user-select:none}
 .rule-drag:active{cursor:grabbing}
 .actions-cell{display:flex;gap:6px}
+
+/* 分组卡片样式 */
+.group-card{background:#1e293b;border:1px solid #334155;border-radius:10px;margin-bottom:12px;overflow:hidden}
+.group-header{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+.group-header:hover{background:#1e293b80}
+.group-header h3{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;color:#f1f5f9}
+.group-header .group-meta{display:flex;align-items:center;gap:12px;font-size:12px;color:#94a3b8}
+.group-header .toggle-icon{transition:transform .2s;color:#64748b}
+.group-card.expanded .toggle-icon{transform:rotate(90deg)}
+.group-body{display:none;border-top:1px solid #334155}
+.group-card.expanded .group-body{display:block}
+.group-actions{display:flex;gap:6px;margin-left:12px}
+.group-desc{color:#64748b;font-weight:400;font-size:12px;margin-left:8px}
 </style>
 </head>
 <body>
@@ -62,11 +77,13 @@ tr:hover td{background:#1e293b80}
 </div>
 <div class="container">
   <div class="tabs">
-    <button class="tab active" onclick="switchTab('routes')">路由</button>
+    <button class="tab active" onclick="switchTab('groups')">规则分组</button>
+    <button class="tab" onclick="switchTab('routes')">路由</button>
     <button class="tab" onclick="switchTab('credentials')">凭据</button>
     <button class="tab" onclick="switchTab('events')">事件日志</button>
   </div>
-  <div id="tab-routes"></div>
+  <div id="tab-groups"></div>
+  <div id="tab-routes" style="display:none"></div>
   <div id="tab-credentials" style="display:none"></div>
   <div id="tab-events" style="display:none"></div>
 </div>
@@ -77,7 +94,8 @@ tr:hover td{background:#1e293b80}
 
 <script>
 const API = '/api';
-let currentTab = 'routes';
+let currentTab = 'groups';
+let currentRoute = 'wecom-callback';
 
 async function api(path, opts = {}) {
   const res = await fetch(API + path, {headers: {'Content-Type': 'application/json'}, ...opts});
@@ -99,11 +117,19 @@ async function loadStats() {
 function switchTab(tab) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab').forEach(t => { if (t.textContent.includes(tab === 'routes' ? '路由' : tab === 'credentials' ? '凭据' : '事件')) t.classList.add('active'); });
+  document.querySelectorAll('.tab').forEach(t => {
+    const txt = t.textContent;
+    if (txt.includes('分组') && tab === 'groups') t.classList.add('active');
+    else if (txt.includes('路由') && tab === 'routes') t.classList.add('active');
+    else if (txt.includes('凭据') && tab === 'credentials') t.classList.add('active');
+    else if (txt.includes('事件') && tab === 'events') t.classList.add('active');
+  });
+  document.getElementById('tab-groups').style.display = tab === 'groups' ? '' : 'none';
   document.getElementById('tab-routes').style.display = tab === 'routes' ? '' : 'none';
   document.getElementById('tab-credentials').style.display = tab === 'credentials' ? '' : 'none';
   document.getElementById('tab-events').style.display = tab === 'events' ? '' : 'none';
-  if (tab === 'routes') loadRoutes();
+  if (tab === 'groups') loadGroups();
+  else if (tab === 'routes') loadRoutes();
   else if (tab === 'credentials') loadCredentials();
   else if (tab === 'events') loadEvents();
 }
@@ -111,6 +137,112 @@ function switchTab(tab) {
 function badge(text, cls) { return `<span class="badge ${cls}">${text}</span>`; }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ---- GROUPS ----
+async function loadGroups() {
+  try {
+    const groups = await api(`/routes/${currentRoute}/groups`);
+    const el = document.getElementById('tab-groups');
+    if (!groups.length) {
+      el.innerHTML = `<div class="card"><div class="card-body"><div class="empty">暂无分组</div></div></div>`;
+      return;
+    }
+    let html = `<div style="margin-bottom:12px;color:#94a3b8;font-size:13px">路由: <span style="color:#38bdf8">${esc(currentRoute)}</span></div>`;
+    for (const g of groups) {
+      const statusBadge = g.enabled ? badge('启用', 'badge-green') : badge('禁用', 'badge-gray');
+      html += `<div class="group-card" id="group-${esc(g.name)}">
+        <div class="group-header" onclick="toggleGroup('${esc(g.name)}')">
+          <h3>
+            <span class="toggle-icon">▶</span>
+            ${esc(g.name)}
+            <span class="group-desc">${esc(g.description || '')}</span>
+            ${statusBadge}
+            <span class="badge badge-purple">${g.rule_count} 规则</span>
+          </h3>
+          <div class="group-header group-meta">
+            <div class="group-actions" onclick="event.stopPropagation()">
+              <button class="btn btn-ghost btn-sm" onclick="toggleGroupEnabled('${esc(g.name)}', ${!g.enabled})">${g.enabled ? '禁用' : '启用'}</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteGroup('${esc(g.name)}')">删除整组</button>
+            </div>
+          </div>
+        </div>
+        <div class="group-body" id="group-body-${esc(g.name)}">
+          <div style="padding:16px 18px;color:#64748b;font-size:13px">加载中...</div>
+        </div>
+      </div>`;
+    }
+    el.innerHTML = html;
+  } catch(e) {
+    document.getElementById('tab-groups').innerHTML = `<div class="card"><div class="card-body"><div class="empty">加载失败: ${esc(e.message)}</div></div></div>`;
+  }
+}
+
+async function toggleGroup(name) {
+  const card = document.getElementById(`group-${name}`);
+  const body = document.getElementById(`group-body-${name}`);
+  const isExpanded = card.classList.contains('expanded');
+  
+  if (isExpanded) {
+    card.classList.remove('expanded');
+  } else {
+    card.classList.add('expanded');
+    // 加载分组内规则
+    try {
+      const rules = await api(`/routes/${currentRoute}/rules`);
+      const groupRules = rules.filter(r => (r._group || 'default') === name);
+      if (!groupRules.length) {
+        body.innerHTML = '<div style="padding:16px 18px;color:#64748b;font-size:13px">无规则</div>';
+        return;
+      }
+      let html = '<table><thead><tr><th>名称</th><th>条件</th><th>动作</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+      for (const rule of groupRules) {
+        const actionType = (rule.action || {}).type || '-';
+        const actionBadge = actionType === 'ignore' ? badge('ignore', 'badge-red') :
+                            actionType === 'forward' ? badge('forward', 'badge-green') :
+                            actionType === 'ai_process' ? badge('ai_process', 'badge-blue') : badge(actionType, 'badge-gray');
+        const enabledBadge = rule.enabled !== false ? badge('启用', 'badge-green') : badge('禁用', 'badge-gray');
+        const conds = Object.entries(rule.conditions || {}).map(([k,v]) => `${k}=${v}`).join(', ') || '(全部)';
+        html += `<tr>
+          <td>${esc(rule.name)}</td>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(conds)}</td>
+          <td>${actionBadge}</td>
+          <td>${enabledBadge}</td>
+          <td class="actions-cell">
+            <button class="btn btn-ghost btn-sm" onclick="showEditRule('${esc(currentRoute)}','${esc(rule.name)}')">编辑</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteRule('${esc(currentRoute)}','${esc(rule.name)}')">删除</button>
+          </td>
+        </tr>`;
+      }
+      html += '</tbody></table>';
+      body.innerHTML = html;
+    } catch(e) {
+      body.innerHTML = `<div style="padding:16px 18px;color:#f87171;font-size:13px">加载失败: ${esc(e.message)}</div>`;
+    }
+  }
+}
+
+async function toggleGroupEnabled(name, enable) {
+  try {
+    await api(`/routes/${currentRoute}/groups/${name}/enable`, {
+      method: 'PUT',
+      body: JSON.stringify({enabled: enable})
+    });
+    loadGroups();
+  } catch(e) {
+    alert('操作失败: ' + e.message);
+  }
+}
+
+async function deleteGroup(name) {
+  if (!confirm(`确定删除分组 "${name}" 及其所有规则？此操作不可恢复！`)) return;
+  try {
+    await api(`/routes/${currentRoute}/groups/${name}`, {method: 'DELETE'});
+    loadGroups();
+    loadStats();
+  } catch(e) {
+    alert('删除失败: ' + e.message);
+  }
+}
 
 // ---- ROUTES ----
 async function loadRoutes() {
@@ -127,7 +259,7 @@ async function loadRoutes() {
         <div><button class="btn btn-primary btn-sm" onclick="showAddRule('${esc(r.name)}')">+ 规则</button>
         <button class="btn btn-ghost btn-sm" onclick="deleteRoute('${esc(r.name)}')">删除路由</button></div>
       </div>
-      <div class="card-body"><table><thead><tr><th></th><th>名称</th><th>条件</th><th>动作</th><th>上下文</th><th>状态</th><th>操作</th></tr></thead><tbody>`;
+      <div class="card-body"><table><thead><tr><th></th><th>名称</th><th>条件</th><th>动作</th><th>分组</th><th>状态</th><th>操作</th></tr></thead><tbody>`;
     const rules = r.rules || [];
     for (let i = 0; i < rules.length; i++) {
       const rule = rules[i];
@@ -136,13 +268,14 @@ async function loadRoutes() {
                           actionType === 'forward' ? badge('forward', 'badge-green') :
                           actionType === 'ai_process' ? badge('ai_process', 'badge-blue') : badge(actionType, 'badge-gray');
       const enabledBadge = rule.enabled !== false ? badge('启用', 'badge-green') : badge('禁用', 'badge-gray');
+      const groupBadge = rule._group ? badge(rule._group, 'badge-purple') : badge('default', 'badge-gray');
       const conds = Object.entries(rule.conditions || {}).map(([k,v]) => `${k}=${v}`).join(', ') || '(全部)';
       html += `<tr>
         <td class="rule-drag" draggable="true" data-route="${esc(r.name)}" data-idx="${i}">⠿</td>
         <td>${esc(rule.name)}</td>
         <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(conds)}</td>
         <td>${actionBadge}</td>
-        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#94a3b8;font-size:12px">${esc(rule.context || '')}</td>
+        <td>${groupBadge}</td>
         <td>${enabledBadge}</td>
         <td class="actions-cell">
           <button class="btn btn-ghost btn-sm" onclick="showEditRule('${esc(r.name)}','${esc(rule.name)}')">编辑</button>
@@ -165,7 +298,6 @@ function setupDragSort() {
       const targetRoute = el.dataset.route;
       const targetIdx = parseInt(el.dataset.idx);
       if (dragRoute !== targetRoute) return;
-      // Reorder
       const rules = await api(`/routes/${targetRoute}/rules`);
       const order = rules.map(r => r.name);
       const [moved] = order.splice(dragIdx, 1);
@@ -186,6 +318,7 @@ async function deleteRule(routeName, ruleName) {
   if (!confirm(`确定删除规则 "${ruleName}"？`)) return;
   await api(`/routes/${routeName}/rules/${ruleName}`, {method: 'DELETE'});
   loadRoutes(); loadStats();
+  if (currentTab === 'groups') loadGroups();
 }
 
 function showAddRoute() {
@@ -208,7 +341,6 @@ function showAddRoute() {
     })});
     closeModal(); loadRoutes(); loadStats();
   });
-  // Populate credential options
   api('/credentials').then(creds => {
     const sel = document.getElementById('f-route-cred');
     creds.forEach(c => { const o = document.createElement('option'); o.value = c.name; o.textContent = `${c.name} (${c.type})`; sel.appendChild(o); });
@@ -222,8 +354,11 @@ function ruleFormFields(rule = {}) {
   return `
     <div class="form-group"><label>规则名称</label><input id="f-rule-name" value="${esc(rule.name || '')}"></div>
     <div class="form-row">
-      <div class="form-group"><label>动作类型</label><select id="f-rule-action"><option value="forward" ${action.type==='forward'?'selected':''}>forward</option><option value="ignore" ${action.type==='ignore'?'selected':''}>ignore</option><option value="ai_process" ${action.type==='ai_process'?'selected':''}>ai_process</option></select></div>
+      <div class="form-group"><label>分组</label><input id="f-rule-group" value="${esc(rule._group || '')}" placeholder="default"></div>
       <div class="form-group"><label>启用</label><select id="f-rule-enabled"><option value="true" ${rule.enabled!==false?'selected':''}>启用</option><option value="false" ${rule.enabled===false?'selected':''}>禁用</option></select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>动作类型</label><select id="f-rule-action"><option value="forward" ${action.type==='forward'?'selected':''}>forward</option><option value="ignore" ${action.type==='ignore'?'selected':''}>ignore</option><option value="ai_process" ${action.type==='ai_process'?'selected':''}>ai_process</option></select></div>
     </div>
     <div class="form-group"><label>匹配条件 <button class="btn btn-ghost btn-sm" onclick="addCondRow()">+</button></label><div id="cond-rows">${condRows || '<div class="form-row"><div class="form-group"><input placeholder="Key" class="cond-key"></div><div class="form-group"><input placeholder="Value" class="cond-val"></div></div>'}</div></div>
     <div class="form-group"><label>上下文约定</label><textarea id="f-rule-context" rows="2" placeholder="AI 处理时的上下文提示">${esc(rule.context || '')}</textarea></div>
@@ -240,9 +375,11 @@ function getRuleFromForm() {
   const vals = document.querySelectorAll('.cond-val');
   const conditions = {};
   keys.forEach((k, i) => { const key = k.value.trim(); const val = vals[i]?.value.trim(); if (key) conditions[key] = val || ''; });
+  const group = document.getElementById('f-rule-group').value.trim();
   return {
     name: document.getElementById('f-rule-name').value.trim(),
     enabled: document.getElementById('f-rule-enabled').value === 'true',
+    _group: group || undefined,
     conditions,
     action: {type: document.getElementById('f-rule-action').value},
     context: document.getElementById('f-rule-context').value,
@@ -257,7 +394,6 @@ function showAddRule(routeName) {
     const res = await api(`/routes/${routeName}/rules`, {method: 'POST', body: JSON.stringify(rule)});
     if (res.conflicts) {
       showConflicts(res.conflicts, rule, async () => {
-        // Force add despite conflicts
         await api(`/routes/${routeName}/rules`, {method: 'POST', body: JSON.stringify({...rule, _force: true})});
         closeModal(); loadRoutes(); loadStats();
       });
@@ -283,6 +419,7 @@ function showEditRule(routeName, ruleName) {
         return;
       }
       closeModal(); loadRoutes(); loadStats();
+      if (currentTab === 'groups') loadGroups();
     });
   });
 }
@@ -410,7 +547,7 @@ function closeModal() { document.getElementById('modal-overlay').classList.remov
 document.getElementById('modal-overlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
 
 // ---- INIT ----
-loadRoutes();
+loadGroups();
 loadStats();
 </script>
 </body>

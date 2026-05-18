@@ -299,6 +299,113 @@ async def reorder_rules(route_name: str, order: List[str], request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Rule Groups
+# ---------------------------------------------------------------------------
+
+@router.get("/routes/{route_name}/groups")
+async def list_groups(route_name: str, request: Request):
+    """获取路由的规则分组列表"""
+    mgr = _get_config(request)
+    rc = mgr.get_route(route_name)
+    if not rc:
+        raise HTTPException(404, f"路由 '{route_name}' 不存在")
+    
+    # 支持 rule_groups 格式
+    if "rule_groups" in rc:
+        groups = rc.get("rule_groups", [])
+        result = []
+        for g in groups:
+            group_info = {
+                "name": g.get("name", ""),
+                "description": g.get("description", ""),
+                "enabled": g.get("enabled", True),
+                "rule_count": len(g.get("rules", [])),
+            }
+            result.append(group_info)
+        return result
+    
+    # 兼容旧格式：从 rules 中提取分组信息
+    rules = rc.get("rules", [])
+    group_map = {}
+    for r in rules:
+        group_name = r.get("_group", "default")
+        if group_name not in group_map:
+            group_map[group_name] = {
+                "name": group_name,
+                "description": "",
+                "enabled": r.get("_group_enabled", True),
+                "rule_count": 0,
+            }
+        group_map[group_name]["rule_count"] += 1
+    
+    return list(group_map.values())
+
+
+@router.delete("/routes/{route_name}/groups/{group_name}")
+async def delete_group(route_name: str, group_name: str, request: Request):
+    """删除整个规则分组"""
+    mgr = _get_config(request)
+    rc = mgr.get_route(route_name)
+    if not rc:
+        raise HTTPException(404, f"路由 '{route_name}' 不存在")
+    
+    # 支持 rule_groups 格式
+    if "rule_groups" in rc:
+        groups = rc.get("rule_groups", [])
+        new_groups = [g for g in groups if g.get("name") != group_name]
+        if len(new_groups) == len(groups):
+            raise HTTPException(404, f"分组 '{group_name}' 不存在")
+        rc["rule_groups"] = new_groups
+        mgr.save()
+        return {"ok": True, "deleted_rules": len(groups) - len(new_groups)}
+    
+    # 兼容旧格式：从 rules 中删除该组的规则
+    rules = rc.get("rules", [])
+    new_rules = [r for r in rules if r.get("_group") != group_name]
+    if len(new_rules) == len(rules):
+        raise HTTPException(404, f"分组 '{group_name}' 不存在")
+    rc["rules"] = new_rules
+    mgr.save()
+    return {"ok": True, "deleted_rules": len(rules) - len(new_rules)}
+
+
+@router.put("/routes/{route_name}/groups/{group_name}/enable")
+async def toggle_group(route_name: str, group_name: str, enabled: bool, request: Request):
+    """启用/禁用规则分组"""
+    mgr = _get_config(request)
+    rc = mgr.get_route(route_name)
+    if not rc:
+        raise HTTPException(404, f"路由 '{route_name}' 不存在")
+    
+    # 支持 rule_groups 格式
+    if "rule_groups" in rc:
+        groups = rc.get("rule_groups", [])
+        found = False
+        for g in groups:
+            if g.get("name") == group_name:
+                g["enabled"] = enabled
+                found = True
+                break
+        if not found:
+            raise HTTPException(404, f"分组 '{group_name}' 不存在")
+        mgr.save()
+        return {"ok": True}
+    
+    # 兼容旧格式：更新规则的 enabled 状态
+    rules = rc.get("rules", [])
+    found = False
+    for r in rules:
+        if r.get("_group") == group_name:
+            r["enabled"] = enabled
+            r["_group_enabled"] = enabled
+            found = True
+    if not found:
+        raise HTTPException(404, f"分组 '{group_name}' 不存在")
+    mgr.save()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
 # Event log
 # ---------------------------------------------------------------------------
 
@@ -372,3 +479,25 @@ def _check_conflicts(new_rule: dict, existing_rules: list) -> list:
                     })
 
     return conflicts
+
+
+# ---------------------------------------------------------------------------
+# Alipay Authorization Routes
+# ---------------------------------------------------------------------------
+
+@router.get("/alipay/auth/url")
+async def get_alipay_auth_url():
+    """生成支付宝商家授权链接"""
+    import sys
+    sys.path.insert(0, '/data/scripts')
+    from alipay_auth_handler import generate_auth_url
+    return generate_auth_url()
+
+
+@router.get("/alipay/auth/merchants")
+async def get_alipay_merchants():
+    """获取已授权商家列表"""
+    import sys
+    sys.path.insert(0, '/data/scripts')
+    from alipay_auth_handler import get_merchant_list
+    return get_merchant_list()

@@ -74,15 +74,35 @@ class ConfigManager:
                         except Exception as e:
                             logger.error(f"[config] 路由 {name}: 解密器加载失败: {e}")
 
-            # Build rule engines per route
+            # Build rule engines per route (支持 rule_groups)
             from webhook_dispatcher.rules import RuleEngine
             new_rule_engines: Dict[str, Any] = {}
             total_rules = 0
             for route_name, route_config in routes.items():
-                rules = route_config.get("rules", [])
-                if rules:
-                    new_rule_engines[route_name] = RuleEngine(rules)
-                    total_rules += len(rules)
+                # 支持 rule_groups 和 rules 两种格式
+                if "rule_groups" in route_config:
+                    # 新格式：rule_groups
+                    flat_rules = []
+                    for group in route_config.get("rule_groups", []):
+                        group_enabled = group.get("enabled", True)
+                        group_name = group.get("name", "")
+                        for rule in group.get("rules", []):
+                            rule["_group"] = group_name
+                            rule["_group_enabled"] = group_enabled
+                            # 如果组被禁用，规则也禁用
+                            if not group_enabled:
+                                rule["enabled"] = False
+                            flat_rules.append(rule)
+                    routes[route_name]["rules"] = flat_rules  # 兼容旧逻辑
+                    if flat_rules:
+                        new_rule_engines[route_name] = RuleEngine(flat_rules)
+                        total_rules += len(flat_rules)
+                elif "rules" in route_config:
+                    # 旧格式：rules
+                    rules = route_config.get("rules", [])
+                    if rules:
+                        new_rule_engines[route_name] = RuleEngine(rules)
+                        total_rules += len(rules)
             logger.info(f"[config] 配置已加载: {len(routes)} 路由, {len(new_decryptors)} 解密器, {total_rules} 规则")
 
             # Atomic swap — all or nothing

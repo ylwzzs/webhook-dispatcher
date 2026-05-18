@@ -1,0 +1,64 @@
+"""Internal auth middleware for the dispatcher service."""
+from __future__ import annotations
+
+import hmac
+import logging
+from typing import Callable
+
+from fastapi import Request, Response
+from starlette.middleware.base import BaseHTTPMiddleware
+
+logger = logging.getLogger(__name__)
+
+# Paths that never require auth
+PUBLIC_PATHS = {"/health", "/admin", "/docs", "/openapi.json", "/redoc"}
+# Path prefixes that don't require the shared_secret auth
+# (admin page and API are accessed via browser, not from Nginx proxy)
+# Alipay auth callback is browser redirect, no auth header
+# IoT auth callback is browser redirect, no auth header
+PUBLIC_PREFIXES = ("/api/", "/alipay-auth-callback", "/iot-auth-callback")
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """Auth middleware supporting shared_secret and ip_whitelist modes."""
+
+    def __init__(self, app, config_manager):
+        super().__init__(app)
+        self._config = config_manager
+
+    def _is_public(self, path: str) -> bool:
+        if path in PUBLIC_PATHS:
+            return True
+        for prefix in PUBLIC_PREFIXES:
+            if path.startswith(prefix):
+                return True
+        return False
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        # Public paths skip auth (admin UI, API, health)
+        if self._is_public(request.url.path):
+            return await call_next(request)
+
+        mode = self._config.auth_mode
+
+        if mode == "none" or not mode:
+            return await call_next(request)
+
+        if mode == "shared_secret":
+            expected = self._config.auth_shared_secret
+            provided = request.headers.get("x-dispatcher-secret", "")
+            if not expected or not hmac.compare_digest(provided, expected):
+                logger.warning(f"[auth] 鉴权失败: shared_secret mismatch from {request.client.host}")
+                return Response(content="unauthorized", status_code=401)
+            return await call_next(request)
+
+        if mode == "ip_whitelist":
+            client_ip = request.client.host if request.client else ""
+            whitelist = self._config.auth_ip_whitelist
+            if client_ip not in whitelist:
+                logger.warning(f"[auth] 鉴权失败: IP {client_ip} not in whitelist")
+                return Response(content="forbidden", status_code=403)
+            return await call_next(request)
+
+        logger.warning(f"[auth] 未知鉴权模式: {mode}，跳过鉴权")
+        return await call_next(request)
